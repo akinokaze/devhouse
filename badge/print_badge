@@ -29,226 +29,273 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 #
 # TODO:
-#   - Give helpful error messages when the configuration file is missing parts that we expect.
+#   - Give helpful error messages when the configuration file is
+#     missing parts that we expect.
 #   - Add fancypants python documentation
 #   - Add a library or wrapper for CUPS, send the PNG directly to CUPS
-#   - Get the job ID from CUPS, wait for the CUPS job to complete before exiting, fail if the CUPS job fails
+#   - Get the job ID from CUPS,
+#     wait for the CUPS job to complete before exiting,
+#     fail if the CUPS job fails
 #
 
-import gd, os, sys, subprocess, getopt, unicodedata, time, simplejson as json
+import joelgd as gd
+#import gd
+import os
+import sys
+import subprocess
+import getopt
+import unicodedata
+import simplejson as json
+
 
 # set the working directory to the actual path of the script
 os.chdir(os.path.dirname(os.path.realpath(sys.argv[0])))
 
 CONFIGURATION_FILE = './configuration/print_badge.config.json'
 
+
 def print_image(file):
-  # NOTE: we print with -o fitplot because the pngs we create are 72dpi but the printer is 300dpi.
-  #       we could also use imageMagick to change DPI: 'convert foo.png -density 300 foo2.png'
-  # Dymo note: the diskette labels we use have a printable area of 2.10in x 2.54in @ 300 dpi
-  #            that's 630 x 762
-  print_file = 'lp -d DYMO-LabelWriter-400 -o landscape -o fitplot'.split() + [file]
-  # print_file = 'lp -H test -d DYMO_LabelWriter_400_USB_1 -o landscape -o fitplot'.split() + [file]
+    # NOTE: we print with -o fitplot because the pngs we create
+    #       are 72dpi but the printer is 300dpi. We could also
+    #       use imageMagick to change DPI:
+    #       'convert foo.png -density 300 foo2.png'
+    # Dymo note: the diskette labels we use have a printable area of:
+    #            2.10in x 2.54in @ 300 dpi, that's 630 x 762
+    print_file = ('lp -d DYMO-LabelWriter-400 '
+                  '-o landscape -o fitplot'.split() + [file])
+    # print_file = ('lp -H test -d DYMO_LabelWriter_400_USB_1 '
+    #               '-o landscape -o fitplot'.split() + [file])
 
+    # n:"no print", q:"quick view"
+    opts, args = getopt.getopt(sys.argv[1:], "nq")
+    if opts and '-n' in opts[0]:
+        print "Not executing command:", print_file
+    elif opts and '-q' in opts[0]:
+        try:
+            subprocess.call(['qiv', file])
+        except:
+            print "can't find quick image viewer: apt-get install qiv"
+    else:
+        subprocess.call(print_file)
 
-  opts, args = getopt.getopt(sys.argv[1:], "nq") # n:"no print", q:"quick view"
-  if opts and '-n' in opts[0]:
-    print "Not executing command:",print_file
-  elif opts and '-q' in opts[0]:
-    try:
-      subprocess.call(['qiv',file])
-    except:
-      print "can't find quick image viewer: apt-get install qiv"
-  else:
-    subprocess.call(print_file)
 
 def wrapstring(string, nlines):
-  if (nlines == 1):
-     return string
-  # find index of first wrapping point in string
-  opt_wrap_pt = len(string)/nlines
-  prev_space = string.rfind(' ', 0, opt_wrap_pt)    # -1 if not found
-  next_space = string.find(' ', opt_wrap_pt)        # -1 if not found
-  # choose the space that is closest to the optimal wrapping point
-  if (next_space > 0) and ((opt_wrap_pt - prev_space) > (next_space - opt_wrap_pt)):
-    split_point = next_space
-  else:
-    split_point = prev_space
-  if split_point < 0:
-    return string
-  ns = string[:split_point] + '\n' + wrapstring(string[split_point+1:], nlines - 1)
-  #print nlines,':',ns,';'
-  #print ns
-  return ns
+    if (nlines == 1):
+        return string
+    # find index of first wrapping point in string
+    opt_wrap_pt = len(string)/nlines
+    prev_space = string.rfind(' ', 0, opt_wrap_pt)    # -1 if not found
+    next_space = string.find(' ', opt_wrap_pt)        # -1 if not found
+    # choose the space that is closest to the optimal wrapping point
+    if (next_space > 0) and ((opt_wrap_pt - prev_space) >
+                             (next_space - opt_wrap_pt)):
+        split_point = next_space
+    else:
+        split_point = prev_space
+    if split_point < 0:
+        return string
+    ns = "%s\n%s" % (string[:split_point],
+                     wrapstring(string[split_point+1:], nlines - 1))
+    #print nlines,':',ns,';'
+    #print ns
+    return ns
 
 # Shorthand for image positions.
 # B = Bottom, T = Top, L = Left, R = Right, X = x, Y = y
-(BL_X,BL_Y,BR_X,BR_Y,TL_X,TL_Y,TR_X,TR_Y) = (0,1,2,3,4,5,6,7)
+(BL_X, BL_Y, BR_X, BR_Y, TL_X, TL_Y, TR_X, TR_Y) = (0, 1, 2, 3, 4, 5, 6, 7)
 
-def get_ideal_text_size(im,width, height, font, text):
-  size = 100  # arbitrary initial value, scaled to fit below
-  p = im.get_bounding_rect(font,size, 0, (0,0), text)
-  return_size = size * min(
-    (float(width)  / float(p[BR_X] - p[BL_X])), # width ratio
-    (float(height) / float(p[BR_Y] - p[TR_Y]))  # height ratio
-    )
-  #print "\ntext:", text, "\nsize:", return_size
-  return return_size
+
+def get_ideal_text_size(im, width, height, font, text):
+    size = 100  # arbitrary initial value, scaled to fit below
+    print "get_bounding_rect(", font, size, 0, (0, 0), text
+    p = im.get_bounding_rect(font, size, 0, (0, 0), text)
+    print "get_bounding_rect results: ", p
+    width_ratio = (float(width) / float(p[BR_X] - p[BL_X]))
+    height_ratio = (float(height) / float(p[BR_Y] - p[TR_Y]))
+    return_size = size * min(width_ratio, height_ratio)
+    #print "\ntext:", text, "\nsize:", return_size
+    return return_size
+
 
 # Implement next:
 #   - Margins: top, bottom, left, right
 #   - Alignment: left, right, center
-def place_text(image,(x,y),item):
-  input = {}
-  input['x'],input['y'],input['wraptext'],(input['width'],input['height']) = x,y,0,image.size()
+def place_text(image, (x, y), item):
+    input = {}
+    input['x'] = x
+    input['y'] = y
+    input['wraptext'] = 0
+    (input['width'], input['height']) = image.size()
 
-  for val in ["x","y","width","height","wraptext"]:
-    try: item[val]
-    except KeyError: continue
-    if item[val]: input[val] = item[val]
+    for val in ["x", "y", "width", "height", "wraptext"]:
+        try:
+            item[val]
+        except KeyError:
+            continue
+        if item[val]:
+            input[val] = item[val]
 
-  color = image.colorAllocate(item["color"])
+    color = image.colorAllocate(item["color"])
 
-  bb_wid=input["width"]
-  bb_ht=input["height"]
-  font=item["font"]
-  text=item["string"]
+    bb_wid = input["width"]
+    bb_ht = input["height"]
+    font = item["font"]
+    text = item["string"]
 
-  if input['wraptext']:
-    best_size = -1
-    nlines = 1
-    # if the line of text is too wide, it'll be shrunk to fit.
-    # when we split it, the font size will increase until height
-    # becomes the dominating constraint, so we keep wrapping long as
-    # the font size keeps increasing
-    while 1:
-      wraptext = wrapstring(text,nlines)
-      size = get_ideal_text_size(image, bb_wid, bb_ht, font, wraptext)
-      if size <= best_size:
-        break
-      best_size = size
-      best_text = wraptext
-      nlines += 1
+    if input['wraptext']:
+        best_size = -1
+        nlines = 1
+        # if the line of text is too wide, it'll be shrunk to fit.
+        # when we split it, the font size will increase until height
+        # becomes the dominating constraint, so we keep wrapping long as
+        # the font size keeps increasing
+        while 1:
+            wraptext = wrapstring(text, nlines)
+            size = get_ideal_text_size(image, bb_wid, bb_ht, font, wraptext)
+            if size <= best_size:
+                break
+            best_size = size
+            best_text = wraptext
+            nlines += 1
 
-    size = best_size
-    text = best_text
-  else:
-    size = get_ideal_text_size(image, bb_wid, bb_ht, font, text)
+        size = best_size
+        text = best_text
+    else:
+        size = get_ideal_text_size(image, bb_wid, bb_ht, font, text)
 
-  p = image.get_bounding_rect(font, size, 0, (0,0), text)
-  y = p[TR_Y]*-1
+    p = image.get_bounding_rect(font, size, 0, (0, 0), text)
+    y = p[TR_Y]*-1
 
-  rv = image.string_ttf(font,size,0,(input["x"],input["y"] + y),text,color)
-  return (input["x"],rv[BR_Y])
+    str_x = input["x"]
+    str_y = input["y"] + y
+    rv = image.string_ttf(font, size, 0, (str_x, str_y), text, color)
+    return (input["x"], rv[BR_Y])
+
 
 def make_qrcode_png(qrfile, fname, lname, email, note):
-  #print "qrmake: %s %s %s %s %s" % (qrfile,fname,lname,email,note)
+    #print "qrmake: %s %s %s %s %s" % (qrfile,fname,lname,email,note)
 
-  # vcard format is too verbose...
-  # especially the rigorous version created by python's vobject.vCard()
-  #import vobject
-  #j = vobject.vCard()
-  #j.add('n')
-  #j.n.value = vobject.vcard.Name(given=fname, family=lname)
-  #j.add('fn')
-  #j.fn.value = fname + " " + lname
-  #j.add('email')
-  #j.email.value = email
-  #j.email.type_param = 'INTERNET'
-  #j.add('note')
-  #j.note.value = note
+    # vcard format is too verbose...
+    # especially the rigorous version created by python's vobject.vCard()
+    #import vobject
+    #j = vobject.vCard()
+    #j.add('n')
+    #j.n.value = vobject.vcard.Name(given=fname, family=lname)
+    #j.add('fn')
+    #j.fn.value = fname + " " + lname
+    #j.add('email')
+    #j.email.value = email
+    #j.email.type_param = 'INTERNET'
+    #j.add('note')
+    #j.note.value = note
 
-  #bad_text = j.serialize()
-  ## android's barcode reader app doesn't like commas to be escaped
-  #good_text = bad_text.replace("\\,", ",")
+    #bad_text = j.serialize()
+    ## android's barcode reader app doesn't like commas to be escaped
+    #good_text = bad_text.replace("\\,", ",")
 
-  #print "qr.vc: %d, %s\n" % (len(good_text), good_text)
+    #print "qr.vc: %d, %s\n" % (len(good_text), good_text)
 
-  #subprocess.call(['qrencode', '--size=3', '-m0', '-o', qrfile , good_text])
-  #subprocess.call(['identify', qrfile])
+    #subprocess.call(['qrencode', '--size=3', '-m0', '-o', qrfile , good_text])
+    #subprocess.call(['identify', qrfile])
 
-  mecard = "MECARD:N:%s,%s;EMAIL:%s;NOTE:%s;;" % (
-    lname.replace(',',''),
-    fname.replace(',',''),
-    email,
-    note.replace(';',','))
+    mecard = "MECARD:N:%s,%s;EMAIL:%s;NOTE:%s;;" % (
+        lname.replace(',', ''),
+        fname.replace(',', ''),
+        email,
+        note.replace(';', ','))
 
-  subprocess.call(['qrencode', '--size=5', '-m0', '-o', qrfile , mecard])
-  print "qr.me: %d, %s\n" % (len(mecard), mecard)
-  subprocess.call(['identify', qrfile])
+    subprocess.call(['qrencode', '--size=5', '-m0', '-o', qrfile, mecard])
+    print "qr.me: %d, %s\n" % (len(mecard), mecard)
+    subprocess.call(['identify', qrfile])
 
 
 def main():
-  configuration_file = open(CONFIGURATION_FILE)
-  conf = json.load(configuration_file)
+    configuration_file = open(CONFIGURATION_FILE)
+    conf = json.load(configuration_file)
 
-  # read card data in from stdin
-  stdin = sys.stdin.read()
-  card = json.loads(stdin)
+    # read card data in from stdin
+    stdin = sys.stdin.read()
+    card = json.loads(stdin)
 
-  # merge in the card data we just got from STDIN into the default configuration
-  for key,value in card.iteritems():
-    if conf.has_key(key):
-      conf[key]["string"] = value
+    # merge in the card data we just got from STDIN
+    # into the default configuration
+    for key, value in card.iteritems():
+        if key in conf:
+            conf[key]["string"] = value
 
-  conf["badge"]["file"] = ''.join(('./completed/',card["key"],"_shdh",card["shdh_number"],'.png'))
+    filename = "./completed/%s_shdh%s" % (card["key"], card["shdh_number"])
+    conf["badge"]["file"] = "%s.png" % filename
 
+    if 'qr_code' in conf["badge"]["design"]:
+        try:
+            qrfile = "%s.qrcode.png" % filename
+            make_qrcode_png(qrfile,
+                            card['first_name'],
+                            card['last_name'],
+                            card['key'],
+                            'SHDH %(shdh_number)s -- %(tags)s' % card)
+            conf["qr_code"]["file"] = qrfile
+        except:
+            message = ("oh well, no qr code...  "
+                       "try: 'apt-get install qrencode' \n python says: ")
+            print message, sys.exc_info()
 
-  if 'qr_code' in conf["badge"]["design"]:
     try:
-      qrfile = './completed/%(key)s_shdh%(shdh_number)s.qrcode.png' % card
-      make_qrcode_png(qrfile, card['first_name'], card['last_name'], card['key'],
-                              'SHDH %(shdh_number)s -- %(tags)s' % card)
-      conf["qr_code"]["file"] = qrfile
-    except : print "oh well, no qr code...  try: 'apt-get install qrencode' \n python says:", sys.exc_info()
+        conf["badge"]["remove_accents"]
+    except KeyError:
+        conf["badge"]["remove_accents"] = None
 
-  try: conf["badge"]["remove_accents"]
-  except KeyError: conf["badge"]["remove_accents"] = None
+    os.environ["GDFONTPATH"] = conf["badge"]["font_path"]
 
-  os.environ["GDFONTPATH"] = conf["badge"]["font_path"]
+    im = gd.image((conf["badge"]["width"], conf["badge"]["height"]))
+    print im
+    im.colorAllocate(conf["badge"]["color"])
 
-  im = gd.image((conf["badge"]["width"],conf["badge"]["height"]))
-  white = im.colorAllocate(conf["badge"]["color"])
+    x, y = 0, 0
 
-  x,y = 0,0
+    for item in conf["badge"]["design"]:
+        # There has to be a better way to test for if a variable is defined
+        try:
+            conf[item]["string"]
+        except KeyError:
+            conf[item]["string"] = None
+        try:
+            conf[item]["file"]
+        except KeyError:
+            conf[item]["file"] = None
 
-  for item in conf["badge"]["design"]:
-    # There has to be a better way to test for if a variable is defined
-    try: conf[item]["string"]
-    except KeyError: conf[item]["string"] = None
-
-    try: conf[item]["file"]
-    except KeyError: conf[item]["file"] = None
-
-    if conf[item]["file"]:
-      temporary = gd.image(conf[item]["file"])
-      ix,iy = conf[item]["x"],conf[item]["y"]
-      try:
-        iw,ih = conf[item]["width"],conf[item]["height"]
-        (tw,th) = temporary.size()
-        if (tw > iw) or (th > ih):
-          #### it would be better to preserve the aspect ratio
-          print "ooops, sloppy shrinking of image in progress..."
-          temporary.copyResizedTo(im,(ix, iy),(0,0),(iw,ih))
+        if conf[item]["file"]:
+            temporary = gd.image(conf[item]["file"])
+            ix, iy = conf[item]["x"], conf[item]["y"]
+            try:
+                iw, ih = conf[item]["width"], conf[item]["height"]
+                (tw, th) = temporary.size()
+                if (tw > iw) or (th > ih):
+                    #### it would be better to preserve the aspect ratio
+                    print "ooops, sloppy shrinking of image in progress..."
+                    temporary.copyResizedTo(im, (ix, iy), (0, 0), (iw, ih))
+                else:
+                    newx = ix + ((iw - tw) / 2)
+                    newy = iy + ((ih - th) / 2)
+                    temporary.copyTo(im, (newx, newy))
+            except KeyError:
+                temporary.copyTo(im, (ix, iy))
+        elif conf[item]["string"]:
+            if conf["badge"]["remove_accents"]:
+                normalized = unicodedata.normalize('NFKD',
+                                                   conf[item]["string"])
+                as_ascii = normalized.encode('ascii', 'ignore')
+                conf[item]["string"] = as_ascii
+            (x, y) = place_text(im, (x, y), conf[item])
         else:
-          temporary.copyTo(im,(ix+((iw-tw)/2),iy+((ih-th)/2)))
-      except KeyError:
-        temporary.copyTo(im,(ix,iy))
-    elif conf[item]["string"]:
-      if conf["badge"]["remove_accents"]:
-        conf[item]["string"] = unicodedata.normalize('NFKD', conf[item]["string"]).encode('ascii','ignore')
-      (x,y) = place_text(im,(x,y),conf[item])
-    else:
-      print "ERROR"
-
-  badge=open(conf["badge"]["file"],"w")
-  im.writePng(badge)
-  badge.close()
-
-  print_image(conf["badge"]["file"])
+            print "ERROR"
+    badge = open(conf["badge"]["file"], "w")
+    im.writePng(badge)
+    badge.close()
+    print_image(conf["badge"]["file"])
 
 if __name__ == "__main__":
-#  t1 = time.time()
-  main()
-#  t2 = time.time()
-#  print 'took %0.3f ms' % ((t2-t1)*1000.0)
+    #t1 = time.time()
+    main()
+    #t2 = time.time()
+    #print 'took %0.3f ms' % ((t2-t1)*1000.0)
